@@ -12,6 +12,8 @@ def semantic_search(query_embedding, embeddings, examples):
     for i, doc in enumerate(examples):
         print(f"Example {i}: {examples[i]}")
         print(f"Score: {1 - scores[i]:.4f}")
+        
+    print("Most similar example:", examples[scores.index(min(scores))])
 
 def main():
     examples = [ #A
