@@ -2,6 +2,7 @@ from sentence_transformers import SentenceTransformer
 import scipy.spatial
 import pandas as pd
 
+#takes user + documents embeddings + the actual documents
 def semantic_search(query_embedding, embeddings, examples):
     
     #scores computes the cosine distance, which is different than the cosine similiarty
