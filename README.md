@@ -16,7 +16,7 @@ Example query
 query = "Hotel near the Louvre with great food nearby."
 
 Here’s a screenshot of the responses:
- ![result on terminal](https://i.ibb.co/n88c0pcB/Screenshot-2026-07-30-at-03-07-54.png)
+ ![result on terminal](https://i.ibb.co/BHSfshnk/Screenshot-2026-07-30-at-03-18-22.png)
 
 Todos:
 - Creating a user interface
