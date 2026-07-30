@@ -1,60 +1,123 @@
 import numpy as np
-import pandas as pd
-import scipy.spatial as sp
+from sentence_transformers import SentenceTransformer
+from datasets import load_dataset
 
 def cosine_similarity(query_embedding, review_embeddings, k):
-    # We first flatten the query embedding to be able to use it for the dot product
+    # We first flatten the query embedding and make sure it's of type float
     query = np.asarray(query_embedding, dtype=float).reshape(-1)
     
-    # Make sure review_embeddings is an ndarray with a float type
-    review = np.asarray(review_embeddings, dtype=float)
+    # Make sure review_embeddings is an floating-point ndarray
+    reviews = np.asarray(review_embeddings, dtype=float)
     
-    # Make sure review is a 2-D ndarray
-    if review.ndim != 2:
+    # Make sure review is a 2-D ndarray of shape:
+    # (number_of_reviews, embedding_dimension)
+    if reviews.ndim != 2:
         raise ValueError(
             "review_embeddings: must have shape "
             "(n_reviews, embedding_dim)"
         )
     
-    # Verify if dimensions of embedding match
-    if review.shape[1] != query.size:
+    # The query and reviews must have the same embedding dimension.
+    if reviews.shape[1] != query.size:
         raise ValueError(
             f"Embedding dimensions do not match: query has dimensions"
             f"{query.size}, while reviews has dimensions"
-            f"{review.shape[1]}"
+            f"{reviews.shape[1]}"
         )
 
-    # Verify the k parameter
+    # k must be a positive integer, 
     if (
         isinstance(k, (bool, np.bool_)) or
         not isinstance(k, (int, np.integer)) or
         k < 1
     ):
-        raise ValueError("k must be a positive integer."
+        raise ValueError("k must be a positive integer.")
 
-    # Calculate the dot products between the query embedding and each review embedding
-    dot_products = np.dot(review_embeddings, query_embedding)
+    # Verify against empty collections
+    if reviews.shape[0] == 0:
+        raise ValueError("review_embeddings must contain atleast one reviews")
 
-    # Normalize the query embedding
-    query_embedding_norm = np.linalg.norm(query_embedding)
+    # Do not request more results than there are reviews.
+    k = min(k, reviews.shape[0])
 
-    # Normalize the review embeddings
-        # axis=1 means across the columns not the rows
-    review_embeddings_norm = np.lingalg.norm(query_embedding, axis=1)
+    # Calculate norms
+    query_norm = np.linalg.norm(query)
+    reviews_norm = np.linalg.norm(reviews, axis=1)
     
+    denominators = query_norm  * reviews_norm 
+    
+    # One dot product for each review
+    dot_products = reviews @ query
+
     # Calculate the cosine similarity
-        # before that we need to compute the Norms of the embeddings
-    
-    cosine_similarity = dot_products / (query_embedding_norm * review_embeddings_norm )
+    similarities = np.divide(
+        dot_products,
+        denominators,
+        out=np.zeros_like(dot_products, dtype=float), # decides what value the skipped positions should contain
+        where=denominators != 0, # this is mask that decides which position should we calculate and which one should we not
+    )
     
     # To retrieve the top-k similarity scores, we need their indicies first
     # We want to get the top-k largest cosine similarity scores, not the top-k smallest ones
     # Since, .argsort() sorts in asc order, we need to reverse the order of numbers by negating the similarity scores
-    top_k_indicies = np.argsort(-cosine_similarity)[:k]
+    top_k_indicies = np.argsort(-similarities)[:k]
     
-    # Retrieve the top-k cosine similarity scores using their indicies
-    top_k_similarity_scores = [cosine_similarity[i] for i in top_k_indicies]
+    # Retrieve the top-k similarity scores using their indicies
+    top_k_similarity_scores = similarities[top_k_indicies]
     
-    #return top_k_indicies, top_k_cosine_similarity_scores
     return top_k_indicies, top_k_similarity_scores
+
+def main():
     
+    # Load an embedding model
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    # Define an example search query
+    query =  "Hotel near the Louvre with great food nearby."
+
+    # Load the datasetset
+    dataset = load_dataset("traversaal-ai-hackathon/hotel_datasets")
+
+    # Convert it into a DataFrame
+    df = dataset["train"].to_pandas()
+
+    # Filter for hotels in Paris only
+    df_paris = df.loc[df.locality == "Paris"].copy()
+    
+    # Show how many unique hotels in paris the dataset has
+    print(df_paris.hotel_name.value_counts())
+    
+    # Clean the data
+    df_paris = df_paris.dropna(subset=["review_text"])
+    # this means: if after stripping the whitespaces we still have a value e.g., "a" or something
+    df_paris = df_paris.loc[df_paris.review_text.str.strip() != ""]
+
+    #resetting the index
+    df_paris = df_paris.reset_index(drop=True)
+
+    # Extract reviews
+    reviews = df_paris.review_text.tolist()
+    
+    # Create embeddings for the reviews
+    reviews_embeddings = model.encode(reviews, show_progress_bar=True)
+    
+    print(f"Embeddings shape: {reviews_embeddings.shape}")
+
+    # Embed the search query
+    query_embedding = model.encode([query])
+
+    # Top-k similar reviews to retrieve
+    k = 5
+
+    indices, scores = cosine_similarity(query_embedding, reviews_embeddings, k)
+    
+    print(f"Query: {query}")
+    print("Top hotel with similar reviews matching the query")
+    for i, (idx, score) in enumerate(zip(indices, scores), 1):
+        print(f"{i}. {df_paris.iloc[idx]['hotel_name']}")  # D
+        print(f"Review: {df_paris.iloc[idx]['review_text']}")  # E
+        print(f"Cosine similarity: {score:.4f}")  # F
+        print()
+        
+if __name__ == "__main__":
+    main()
