@@ -25,3 +25,4 @@ Todos:
 - Reuse cached embeddings between searches
 - Choose a Licence for the project
 - Host the project
+- Add an LLM that receives only the retrieved part and produces a structured formatted recommendation.
