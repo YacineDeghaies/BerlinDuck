@@ -55,7 +55,7 @@ def cosine_similarity(query_embedding, review_embeddings, k):
         dot_products,
         denominators,
         out=np.zeros_like(dot_products, dtype=float), # decides what value the skipped positions should contain
-        where=denominators != 0, # this is mask that decides which position should we calculate and which one should we not
+        where=denominators != 0, # this is a mask that decides which position should we calculate and which one should we not
     )
     
     # To retrieve the top-k similarity scores, we need their indicies first
@@ -90,8 +90,11 @@ def main():
     
     # Clean the data
     df_paris = df_paris.dropna(subset=["review_text"])
+
     # this means: if after stripping the whitespaces we still have a value e.g., "a" or something
-    df_paris = df_paris.loc[df_paris.review_text.str.strip() != ""]
+    df_paris = df_paris.loc[
+        df_paris.review_text.str.strip() != "" # Check wheather each cleaned row is not an empty string
+    ]
 
     #resetting the index
     df_paris = df_paris.reset_index(drop=True)
