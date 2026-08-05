@@ -1,0 +1,5 @@
+numpy
+pandas
+datasets
+sentence-transformers
+faiss-cpu
