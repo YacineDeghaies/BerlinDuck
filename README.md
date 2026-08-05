@@ -70,7 +70,7 @@ An affordable hotel with view of the Eiffel Tower
 
 Reviews come from the [traversaal-ai-hackathon/hotel_datasets](https://huggingface.co/datasets/traversaal-ai-hackathon/hotel_datasets) dataset on Hugging Face.
 
-## Roadmap
+## Todos
 
 - [x] FAISS-based search for faster retrieval at scale
 - [ ] Support different cities and custom search queries
