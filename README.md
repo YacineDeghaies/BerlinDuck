@@ -1,6 +1,6 @@
 # Hotel Search Engine
 
-A bunch of notebooks demonstrating how to build a semantic search engine for hotel reviews implemented in Python.
+A bunch of notebooks demonstrating how to build a semantic search engine for hotel reviews implemented in Python 3.
 
 Given a query like *"An affordable hotel with a view of the Eiffel Tower"*, this notebook embeds the text and compares it against hotel review embeddings using similarity search, then returns the top-k most relevant matches.
 
