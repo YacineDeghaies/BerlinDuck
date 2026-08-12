@@ -28,3 +28,6 @@ For GPU-accelerated FAISS, replace `faiss-cpu` with `faiss-gpu` in `requirements
 ## Dataset
 
 Reviews come from the [traversaal-ai-hackathon/hotel_datasets](https://huggingface.co/datasets/traversaal-ai-hackathon/hotel_datasets) dataset on Hugging Face.
+
+If you'd like to request a notebook experiment, open an issue and maybe I'll do it tomorrow.
+
