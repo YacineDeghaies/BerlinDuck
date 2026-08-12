@@ -1,4 +1,4 @@
-# Hotel Search Engine
+# rag-notebooks
 
 A bunch of notebooks demonstrating how to build a semantic search engine for hotel reviews implemented in Python 3.
 
@@ -29,5 +29,5 @@ For GPU-accelerated FAISS, replace `faiss-cpu` with `faiss-gpu` in `requirements
 
 Reviews come from the [traversaal-ai-hackathon/hotel_datasets](https://huggingface.co/datasets/traversaal-ai-hackathon/hotel_datasets) dataset on Hugging Face.
 
-If you'd like to request a notebook experiment, open an issue and maybe I'll do it tomorrow.
+This repo will still grow
 
