@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# editor swap files
+*.swp
+*.swo
+.*.sw[a-p]
+.swp
+
+# model / dataset caches and generated indexes
+.cache/
+*.faiss
+data/*.parquet
