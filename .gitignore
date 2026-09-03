@@ -17,5 +17,5 @@ build/
 
 # model / dataset caches and generated indexes
 .cache/
-*.faiss
+data/qdrant/
 data/*.parquet

@@ -1,32 +1,37 @@
-"""Ingestion pipeline: load reviews -> clean -> chunk -> embed -> persist an index.
+"""Ingestion pipeline: load reviews -> clean -> chunk -> embed -> upsert to Qdrant.
 
 Run once, offline, before serving queries:
 
-    python -m berlinduck.ingest --locality Paris --out data/index
+    # embedded Qdrant, persisted to ./data/qdrant
+    python -m berlinduck.ingest --locality Paris
+
+    # against a running Qdrant server
+    python -m berlinduck.ingest --locality Paris --qdrant-url http://localhost:6333
 """
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from berlinduck.chunking import chunk_text
 from berlinduck.data import load_reviews
 from berlinduck.embeddings import Embedder
-from berlinduck.vectorstore import Document, FaissStore, NumpyStore
+from berlinduck.vectorstore import DEFAULT_COLLECTION, Document, QdrantStore
 
-DEFAULT_INDEX_DIR = Path("data/index")
-_BACKENDS = {"faiss": FaissStore, "numpy": NumpyStore}
+DEFAULT_QDRANT_PATH = "data/qdrant"
 
 
 def build_index(
     locality: str | None = "Paris",
-    out_dir: str | Path = DEFAULT_INDEX_DIR,
+    *,
+    collection: str = DEFAULT_COLLECTION,
+    qdrant_url: str | None = None,
+    qdrant_path: str | None = DEFAULT_QDRANT_PATH,
     chunk_size: int = 512,
     overlap: int = 64,
-    backend: str = "faiss",
+    recreate: bool = True,
     embedder: Embedder | None = None,
-) -> FaissStore | NumpyStore:
+) -> QdrantStore:
     df = load_reviews(locality=locality)
     embedder = embedder or Embedder()
 
@@ -50,27 +55,42 @@ def build_index(
         raise ValueError(f"no reviews found for locality={locality!r}")
 
     embeddings = embedder.encode_documents([doc.text for doc in documents])
-    store = _BACKENDS[backend](dimension=embedder.dimension)
+    store = QdrantStore(
+        dimension=embedder.dimension,
+        collection=collection,
+        url=qdrant_url,
+        path=None if qdrant_url else qdrant_path,
+        recreate=recreate,
+    )
     store.add(embeddings, documents)
-    store.persist(out_dir)
-    print(f"indexed {len(store)} chunks from {len(df)} reviews -> {out_dir} ({backend})")
+    target = qdrant_url or qdrant_path or ":memory:"
+    print(f"indexed {len(store)} chunks from {len(df)} reviews -> {target} [{collection}]")
     return store
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--locality", default="Paris")
-    parser.add_argument("--out", type=Path, default=DEFAULT_INDEX_DIR)
-    parser.add_argument("--backend", choices=sorted(_BACKENDS), default="faiss")
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION)
+    parser.add_argument("--qdrant-url", default=None, help="Qdrant server URL; overrides --qdrant-path")
+    parser.add_argument("--qdrant-path", default=DEFAULT_QDRANT_PATH, help="local embedded-Qdrant directory")
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--overlap", type=int, default=64)
+    parser.add_argument(
+        "--no-recreate",
+        action="store_false",
+        dest="recreate",
+        help="add to an existing collection instead of dropping it first",
+    )
     args = parser.parse_args()
     build_index(
         locality=args.locality,
-        out_dir=args.out,
+        collection=args.collection,
+        qdrant_url=args.qdrant_url,
+        qdrant_path=args.qdrant_path,
         chunk_size=args.chunk_size,
         overlap=args.overlap,
-        backend=args.backend,
+        recreate=args.recreate,
     )
 
 

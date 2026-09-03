@@ -2,9 +2,7 @@ import numpy as np
 import pytest
 
 from berlinduck.similarity import l2_normalize
-from berlinduck.vectorstore import Document, FaissStore, NumpyStore
-
-BACKENDS = [NumpyStore, FaissStore]
+from berlinduck.vectorstore import Document, QdrantStore
 
 
 def _corpus():
@@ -25,12 +23,15 @@ def _corpus():
     return embeddings, documents
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_search_ranks_by_cosine(backend):
+def _populated_store(**kwargs):
     embeddings, documents = _corpus()
-    store = backend(dimension=3)
+    store = QdrantStore(dimension=3, **kwargs)
     store.add(embeddings, documents)
+    return store
 
+
+def test_search_ranks_by_cosine():
+    store = _populated_store()
     query = l2_normalize(np.array([[1.0, 0.05, 0.0]]))[0]
     hits = store.search(query, k=3)
 
@@ -39,40 +40,49 @@ def test_search_ranks_by_cosine(backend):
     assert hits[0].score >= hits[1].score >= hits[2].score
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_k_larger_than_corpus_is_clamped(backend):
+def test_metadata_round_trips_through_search():
+    store = _populated_store()
+    hit = store.search(l2_normalize(np.array([[0.0, 0.0, 1.0]]))[0], k=1)[0]
+    assert hit.document.id == "c"
+    assert hit.document.metadata == {"hotel": "C"}
+
+
+def test_k_larger_than_collection_is_clamped():
+    store = _populated_store()
+    assert len(store.search(np.array([1.0, 0.0, 0.0]), k=99)) == 3
+
+
+def test_len_reports_point_count():
+    assert len(_populated_store()) == 3
+
+
+def test_reingesting_same_ids_updates_not_duplicates():
+    store = _populated_store()
     embeddings, documents = _corpus()
-    store = backend(dimension=3)
     store.add(embeddings, documents)
-    assert len(store.search(embeddings[0], k=99)) == 3
+    assert len(store) == 3
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_dimension_mismatch_raises(backend):
-    store = backend(dimension=3)
+def test_dimension_mismatch_raises():
+    store = QdrantStore(dimension=3)
     with pytest.raises(ValueError):
         store.add(np.zeros((2, 4), dtype=np.float32), [Document("x", "x"), Document("y", "y")])
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_doc_count_mismatch_raises(backend):
-    store = backend(dimension=3)
+def test_doc_count_mismatch_raises():
+    store = QdrantStore(dimension=3)
     with pytest.raises(ValueError):
         store.add(np.zeros((2, 3), dtype=np.float32), [Document("x", "x")])
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_persist_and_load_round_trip(backend, tmp_path):
-    embeddings, documents = _corpus()
-    store = backend(dimension=3)
-    store.add(embeddings, documents)
-    store.persist(tmp_path)
+def test_persists_to_disk_and_reopens(tmp_path):
+    path = str(tmp_path / "qdrant")
+    store = _populated_store(path=path)
+    before = store.search(l2_normalize(np.array([[0.0, 0.0, 1.0]]))[0], k=2)
+    store.close()
 
-    reloaded = backend.load(tmp_path)
-    assert len(reloaded) == 3
-
-    query = l2_normalize(np.array([[0.0, 0.0, 1.0]]))[0]
-    before = store.search(query, k=2)
-    after = reloaded.search(query, k=2)
+    reopened = QdrantStore(dimension=3, path=path)
+    assert len(reopened) == 3
+    after = reopened.search(l2_normalize(np.array([[0.0, 0.0, 1.0]]))[0], k=2)
     assert [h.document.id for h in before] == [h.document.id for h in after]
-    assert after[0].document.metadata == {"hotel": "C"}
+    reopened.close()

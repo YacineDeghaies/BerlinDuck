@@ -1,8 +1,9 @@
-"""From-scratch cosine similarity search — just NumPy, no ML framework.
+"""From-scratch cosine similarity helpers — just NumPy, no ML framework.
 
-This is the core retrieval primitive the rest of the project is built on. It is
-kept dependency-light and framework-free so it can be unit-tested without
-downloading an embedding model.
+``l2_normalize`` is used by :mod:`berlinduck.embeddings` to unit-length vectors
+before they go to Qdrant. ``top_k_cosine`` is a self-contained reference
+implementation of nearest-neighbour search: the live retrieval path uses Qdrant,
+but this shows the underlying math and is exercised directly by the tests.
 """
 
 from __future__ import annotations

@@ -1,20 +1,27 @@
-"""Vector-store abstraction with two interchangeable backends.
+"""Qdrant-backed vector store.
 
-``NumpyStore`` uses the from-scratch cosine search in :mod:`berlinduck.similarity`;
-``FaissStore`` uses a FAISS flat inner-product index. Both persist to a directory
-holding the vectors, a ``documents.jsonl`` sidecar, and a ``meta.json``.
+One backend, three ways to point it at storage (checked in this order):
+
+* ``client`` — an already-configured :class:`~qdrant_client.QdrantClient`
+* ``url``    — a Qdrant server, e.g. ``http://localhost:6333``
+* ``path``   — embedded Qdrant persisting to a local directory
+* nothing    — embedded, in-memory, ephemeral (used by the CLI demo and tests)
+
+Vectors are stored with cosine distance. Point ids are derived deterministically
+from the document id, so re-ingesting the same corpus updates rather than
+duplicates.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 import numpy as np
+from qdrant_client import QdrantClient, models
 
-from berlinduck.similarity import top_k_cosine
+DEFAULT_COLLECTION = "hotel_reviews"
 
 
 @dataclass(frozen=True)
@@ -30,133 +37,95 @@ class ScoredDocument:
     score: float
 
 
-class VectorStore(Protocol):
-    dimension: int
+class QdrantStore:
+    def __init__(
+        self,
+        dimension: int,
+        collection: str = DEFAULT_COLLECTION,
+        *,
+        client: QdrantClient | None = None,
+        url: str | None = None,
+        path: str | None = None,
+        api_key: str | None = None,
+        recreate: bool = False,
+    ) -> None:
+        if client is not None:
+            self.client = client
+        elif url is not None:
+            self.client = QdrantClient(url=url, api_key=api_key)
+        elif path is not None:
+            self.client = QdrantClient(path=path)
+        else:
+            self.client = QdrantClient(location=":memory:")
 
-    def add(self, embeddings: np.ndarray, documents: list[Document]) -> None: ...
-    def search(self, embedding: np.ndarray, k: int) -> list[ScoredDocument]: ...
-    def persist(self, path: str | Path) -> None: ...
-    def __len__(self) -> int: ...
-
-
-# --- shared sidecar helpers -------------------------------------------------
-
-
-def _write_sidecar(path: Path, dimension: int, documents: list[Document]) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    with (path / "documents.jsonl").open("w") as fh:
-        for doc in documents:
-            fh.write(json.dumps({"id": doc.id, "text": doc.text, "metadata": doc.metadata}) + "\n")
-    (path / "meta.json").write_text(json.dumps({"dimension": dimension}))
-
-
-def _read_sidecar(path: Path) -> tuple[int, list[Document]]:
-    dimension = json.loads((path / "meta.json").read_text())["dimension"]
-    documents: list[Document] = []
-    with (path / "documents.jsonl").open() as fh:
-        for line in fh:
-            record = json.loads(line)
-            documents.append(Document(record["id"], record["text"], record["metadata"]))
-    return dimension, documents
-
-
-def _validate(embeddings: np.ndarray, documents: list[Document], dimension: int) -> np.ndarray:
-    embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
-    if embeddings.ndim != 2 or embeddings.shape[1] != dimension:
-        raise ValueError(f"expected embeddings of shape (n, {dimension}), got {embeddings.shape}")
-    if len(documents) != embeddings.shape[0]:
-        raise ValueError("number of documents must match number of embeddings")
-    return embeddings
-
-
-# --- backends -------------------------------------------------------------
-
-
-class NumpyStore:
-    """Persistent store backed by the from-scratch cosine search."""
-
-    def __init__(self, dimension: int) -> None:
+        self.collection = collection
         self.dimension = dimension
-        self.documents: list[Document] = []
-        self._embeddings: np.ndarray | None = None
+        self._ensure_collection(recreate=recreate)
 
-    def add(self, embeddings: np.ndarray, documents: list[Document]) -> None:
-        embeddings = _validate(embeddings, documents, self.dimension)
-        self._embeddings = (
-            embeddings
-            if self._embeddings is None
-            else np.vstack([self._embeddings, embeddings])
+    def _ensure_collection(self, *, recreate: bool) -> None:
+        exists = self.client.collection_exists(self.collection)
+        if exists and recreate:
+            self.client.delete_collection(self.collection)
+            exists = False
+        if not exists:
+            self.client.create_collection(
+                collection_name=self.collection,
+                vectors_config=models.VectorParams(
+                    size=self.dimension, distance=models.Distance.COSINE
+                ),
+            )
+
+    def add(
+        self,
+        embeddings: np.ndarray,
+        documents: list[Document],
+        batch_size: int = 256,
+    ) -> None:
+        embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+        if embeddings.ndim != 2 or embeddings.shape[1] != self.dimension:
+            raise ValueError(
+                f"expected embeddings of shape (n, {self.dimension}), got {embeddings.shape}"
+            )
+        if len(documents) != embeddings.shape[0]:
+            raise ValueError("number of documents must match number of embeddings")
+
+        points = [
+            models.PointStruct(
+                id=str(uuid5(NAMESPACE_URL, doc.id)),
+                vector=vector.tolist(),
+                payload={"doc_id": doc.id, "text": doc.text, **doc.metadata},
+            )
+            for vector, doc in zip(embeddings, documents)
+        ]
+        for start in range(0, len(points), batch_size):
+            self.client.upsert(
+                collection_name=self.collection,
+                points=points[start : start + batch_size],
+            )
+
+    def search(self, embedding: np.ndarray, k: int) -> list[ScoredDocument]:
+        vector = np.ascontiguousarray(embedding, dtype=np.float32).reshape(-1).tolist()
+        response = self.client.query_points(
+            collection_name=self.collection,
+            query=vector,
+            limit=k,
+            with_payload=True,
         )
-        self.documents.extend(documents)
-
-    def search(self, embedding: np.ndarray, k: int) -> list[ScoredDocument]:
-        if self._embeddings is None:
-            raise RuntimeError("store is empty")
-        k = min(k, len(self.documents))
-        indices, scores = top_k_cosine(np.asarray(embedding, dtype=np.float32), self._embeddings, k)
-        return [
-            ScoredDocument(self.documents[int(i)], float(s)) for i, s in zip(indices, scores)
-        ]
-
-    def __len__(self) -> int:
-        return len(self.documents)
-
-    def persist(self, path: str | Path) -> None:
-        path = Path(path)
-        _write_sidecar(path, self.dimension, self.documents)
-        np.save(path / "embeddings.npy", self._embeddings)
-
-    @classmethod
-    def load(cls, path: str | Path) -> "NumpyStore":
-        path = Path(path)
-        dimension, documents = _read_sidecar(path)
-        store = cls(dimension)
-        store.documents = documents
-        store._embeddings = np.load(path / "embeddings.npy")
-        return store
-
-
-class FaissStore:
-    """Persistent FAISS flat inner-product index (cosine, given normalized inputs)."""
-
-    def __init__(self, dimension: int) -> None:
-        import faiss
-
-        self._faiss = faiss
-        self.dimension = dimension
-        self.index = faiss.IndexFlatIP(dimension)
-        self.documents: list[Document] = []
-
-    def add(self, embeddings: np.ndarray, documents: list[Document]) -> None:
-        embeddings = _validate(embeddings, documents, self.dimension)
-        self.index.add(embeddings)
-        self.documents.extend(documents)
-
-    def search(self, embedding: np.ndarray, k: int) -> list[ScoredDocument]:
-        if not self.documents:
-            raise RuntimeError("store is empty")
-        k = min(k, len(self.documents))
-        query = np.ascontiguousarray(embedding, dtype=np.float32).reshape(1, -1)
-        scores, indices = self.index.search(query, k)
-        return [
-            ScoredDocument(self.documents[i], float(s))
-            for s, i in zip(scores[0], indices[0])
-            if i != -1
-        ]
+        results: list[ScoredDocument] = []
+        for point in response.points:
+            payload = dict(point.payload or {})
+            text = payload.pop("text", "")
+            doc_id = payload.pop("doc_id", str(point.id))
+            results.append(
+                ScoredDocument(
+                    document=Document(id=doc_id, text=text, metadata=payload),
+                    score=float(point.score),
+                )
+            )
+        return results
 
     def __len__(self) -> int:
-        return len(self.documents)
+        return self.client.count(collection_name=self.collection).count
 
-    def persist(self, path: str | Path) -> None:
-        path = Path(path)
-        _write_sidecar(path, self.dimension, self.documents)
-        self._faiss.write_index(self.index, str(path / "index.faiss"))
-
-    @classmethod
-    def load(cls, path: str | Path) -> "FaissStore":
-        path = Path(path)
-        dimension, documents = _read_sidecar(path)
-        store = cls(dimension)
-        store.index = store._faiss.read_index(str(path / "index.faiss"))
-        store.documents = documents
-        return store
+    def close(self) -> None:
+        self.client.close()

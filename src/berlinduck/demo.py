@@ -1,9 +1,9 @@
 """CLI demo: semantic search over hotel reviews.
 
-Uses a persisted index at ``data/index`` if present, otherwise builds an
-in-memory one on the fly:
+Connects to the Qdrant collection built by ``berlinduck.ingest`` if it exists,
+otherwise builds an in-memory one on the fly:
 
-    python -m berlinduck.ingest              # optional: build data/index first
+    python -m berlinduck.ingest              # optional: populate ./data/qdrant first
     python -m berlinduck.demo "a quiet hotel near the Louvre" -k 5
 """
 
@@ -14,18 +14,21 @@ from pathlib import Path
 
 from berlinduck.data import load_reviews
 from berlinduck.retriever import Retriever
-from berlinduck.vectorstore import Document
+from berlinduck.vectorstore import DEFAULT_COLLECTION, Document
 
 DEFAULT_QUERY = "An affordable hotel with a view of the Eiffel Tower"
-DEFAULT_INDEX_DIR = Path("data/index")
+DEFAULT_QDRANT_PATH = "data/qdrant"
 
 
-def _load_retriever(index_dir: Path, locality: str) -> Retriever:
-    if (index_dir / "meta.json").exists():
-        print(f"loading index from {index_dir}")
-        return Retriever.from_index(index_dir)
+def _load_retriever(
+    qdrant_path: str, qdrant_url: str | None, collection: str, locality: str
+) -> Retriever:
+    if qdrant_url or Path(qdrant_path).exists():
+        target = qdrant_url or qdrant_path
+        print(f"connecting to Qdrant at {target} [{collection}]")
+        return Retriever.connect(collection=collection, url=qdrant_url, path=qdrant_path)
 
-    print(f"no index at {index_dir}; building an in-memory one for locality={locality!r}")
+    print(f"no Qdrant store at {qdrant_path}; building an in-memory one for locality={locality!r}")
     df = load_reviews(locality=locality)
     documents = [
         Document(
@@ -35,7 +38,7 @@ def _load_retriever(index_dir: Path, locality: str) -> Retriever:
         )
         for review_id, row in df.iterrows()
     ]
-    return Retriever.from_documents(documents)
+    return Retriever.from_documents(documents, collection=collection)
 
 
 def main() -> None:
@@ -43,10 +46,12 @@ def main() -> None:
     parser.add_argument("query", nargs="?", default=DEFAULT_QUERY)
     parser.add_argument("-k", type=int, default=5, help="number of results")
     parser.add_argument("--locality", default="Paris")
-    parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIR)
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION)
+    parser.add_argument("--qdrant-url", default=None)
+    parser.add_argument("--qdrant-path", default=DEFAULT_QDRANT_PATH)
     args = parser.parse_args()
 
-    retriever = _load_retriever(args.index_dir, args.locality)
+    retriever = _load_retriever(args.qdrant_path, args.qdrant_url, args.collection, args.locality)
     hits = retriever.search(args.query, k=args.k)
 
     print(f"\nQuery: {args.query}\n")

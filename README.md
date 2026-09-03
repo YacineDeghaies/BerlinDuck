@@ -8,15 +8,15 @@ Given a query like *"An affordable hotel with a view of the Eiffel Tower"*, the 
 
 ```
 src/berlinduck/
-  similarity.py   from-scratch cosine top-k search + L2 normalization (NumPy only)
+  similarity.py   L2 normalization + a from-scratch cosine-search reference impl (NumPy)
   chunking.py     split review text into overlapping windows
   embeddings.py   Embedder: SentenceTransformer wrapper, normalized vectors
-  vectorstore.py  VectorStore protocol + NumpyStore / FaissStore backends (persistent)
+  vectorstore.py  QdrantStore: embedded (in-memory / on-disk) or a Qdrant server
   data.py         load + clean the hotel-review dataset
-  ingest.py       pipeline: load -> chunk -> embed -> persist an index
-  retriever.py    Retriever: embed a query, search a store, return SearchHits
+  ingest.py       pipeline: load -> chunk -> embed -> upsert to Qdrant
+  retriever.py    Retriever: embed a query, search Qdrant, return SearchHits
   demo.py         CLI entry point
-tests/            unit tests (similarity, chunking, vector stores)
+tests/            unit tests (similarity, chunking, vector store)
 ```
 
 ## Setup
@@ -39,25 +39,25 @@ pip install -e .
 ## Usage
 
 ```bash
-# 1. build a persistent index (writes data/index/: vectors + documents.jsonl + meta.json)
-python -m berlinduck.ingest --locality Paris --backend faiss
+# 1. ingest: embed reviews and upsert them into an embedded Qdrant at ./data/qdrant
+python -m berlinduck.ingest --locality Paris
 
 # 2. query it
 python -m berlinduck.demo "a quiet hotel near the Louvre" -k 5
 
-# tests (the similarity + chunking + store tests need only numpy + faiss-cpu)
+# tests (similarity + chunking + vector store; need only numpy + qdrant-client)
 pytest
 ```
 
-`--backend numpy` swaps the FAISS index for the from-scratch cosine search in
-`similarity.py`; both implement the same `VectorStore` interface. If no index
-exists, `demo.py` builds an in-memory one on the fly.
+To use a running Qdrant server instead of the embedded one, pass
+`--qdrant-url http://localhost:6333` to both commands. If no store exists at
+`data/qdrant`, `demo.py` builds an in-memory one on the fly.
 
 ## Tech stack
 
 - [Sentence Transformers](https://www.sbert.net/) — text embeddings (`all-MiniLM-L6-v2`)
-- [NumPy](https://numpy.org/) — cosine similarity from scratch
-- [FAISS](https://github.com/facebookresearch/faiss) — fast approximate nearest-neighbor search
+- [Qdrant](https://qdrant.tech/) — vector database (embedded or server), cosine distance
+- [NumPy](https://numpy.org/) — cosine similarity reference implementation
 - [Hugging Face Datasets](https://huggingface.co/docs/datasets/) — hotel review dataset
 - [pandas](https://pandas.pydata.org/) — filtering and data cleaning
 
@@ -72,7 +72,6 @@ SentenceTransformer("all-MiniLM-L6-v2")
 ```
 
 This model converts text into dense vector embeddings suitable for semantic search.
-For GPU-accelerated FAISS, replace `faiss-cpu` with `faiss-gpu` in `pyproject.toml` (requires a CUDA-compatible setup).
 
 ## Dataset
 

@@ -1,13 +1,12 @@
-"""Query-time retrieval: embed a query and search a vector store."""
+"""Query-time retrieval: embed a query and search the Qdrant collection."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from berlinduck.embeddings import Embedder
-from berlinduck.vectorstore import Document, FaissStore, VectorStore
+from berlinduck.vectorstore import DEFAULT_COLLECTION, Document, QdrantStore
 
 
 @dataclass(frozen=True)
@@ -19,22 +18,39 @@ class SearchHit:
 
 
 class Retriever:
-    def __init__(self, store: VectorStore, embedder: Embedder | None = None) -> None:
+    def __init__(self, store: QdrantStore, embedder: Embedder | None = None) -> None:
         self.store = store
         self.embedder = embedder or Embedder()
 
     @classmethod
-    def from_index(cls, path: str | Path, embedder: Embedder | None = None) -> "Retriever":
-        """Load a persisted FAISS index built by :mod:`berlinduck.ingest`."""
-        return cls(FaissStore.load(path), embedder)
+    def connect(
+        cls,
+        *,
+        collection: str = DEFAULT_COLLECTION,
+        url: str | None = None,
+        path: str | None = "data/qdrant",
+        embedder: Embedder | None = None,
+    ) -> "Retriever":
+        """Attach to an existing Qdrant collection built by :mod:`berlinduck.ingest`."""
+        embedder = embedder or Embedder()
+        store = QdrantStore(
+            dimension=embedder.dimension,
+            collection=collection,
+            url=url,
+            path=None if url else path,
+        )
+        return cls(store, embedder)
 
     @classmethod
     def from_documents(
-        cls, documents: list[Document], embedder: Embedder | None = None
+        cls,
+        documents: list[Document],
+        embedder: Embedder | None = None,
+        collection: str = DEFAULT_COLLECTION,
     ) -> "Retriever":
-        """Build an ephemeral in-memory index (used by the CLI demo and tests)."""
+        """Build an ephemeral in-memory collection (used by the CLI demo and tests)."""
         embedder = embedder or Embedder()
-        store = FaissStore(dimension=embedder.dimension)
+        store = QdrantStore(dimension=embedder.dimension, collection=collection)
         store.add(embedder.encode_documents([doc.text for doc in documents]), documents)
         return cls(store, embedder)
 
