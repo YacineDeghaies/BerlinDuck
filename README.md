@@ -21,9 +21,19 @@ tests/            unit tests (similarity, chunking, vector stores)
 
 ## Setup
 
+Dependencies are managed with **pip** (+ the standard-library `venv`); they are
+declared in `pyproject.toml`. Requires Python 3.11+.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install --upgrade pip
+pip install -e ".[dev]"        # runtime deps + pytest and ruff
+```
+
+To install the runtime dependencies only, drop the `[dev]` extra:
+
+```bash
+pip install -e .
 ```
 
 ## Usage
