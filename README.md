@@ -17,7 +17,6 @@ src/berlinduck/
   retriever.py    Retriever: embed a query, search a store, return SearchHits
   demo.py         CLI entry point
 tests/            unit tests (similarity, chunking, vector stores)
-top_k_cosine_similarity_faiss.ipynb   the same pipeline in a notebook
 ```
 
 ## Setup
