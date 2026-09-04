@@ -16,34 +16,41 @@ src/berlinduck/
   ingest.py       pipeline: load -> chunk -> embed -> upsert to Qdrant
   retriever.py    Retriever: embed a query, search Qdrant, return SearchHits
   demo.py         CLI entry point
-tests/            unit tests (similarity, chunking, vector store)
+conftest.py       puts src/ on sys.path for pytest (no install step)
+requirements.txt  dependencies (pip)
 ```
 
 ## Setup
 
-Dependencies are managed with **pip** (+ the standard-library `venv`); they are
-declared in `pyproject.toml`. Requires Python 3.11+.
+Requires **Python 3.11+**. Dependencies are listed in `requirements.txt` and
+installed with pip. If the system Python is older (common on shared servers),
+get 3.11 via conda without needing root:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+conda create -n berlinduck python=3.11
+conda activate berlinduck
+pip install -r requirements.txt
+```
+
+Or, on a machine that already has a 3.11+ interpreter:
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip
-pip install -e ".[dev]"        # runtime deps + pytest and ruff
+pip install -r requirements.txt
 ```
 
-To install the runtime dependencies only, drop the `[dev]` extra:
-
-```bash
-pip install -e .
-```
+The package is not installed — run it with `src/` on the import path
+(`PYTHONPATH=src`). `pytest` handles this itself via `conftest.py`.
 
 ## Usage
 
 ```bash
 # 1. ingest: embed reviews and upsert them into an embedded Qdrant at ./data/qdrant
-python -m berlinduck.ingest --locality Paris
+PYTHONPATH=src python -m berlinduck.ingest --locality Paris
 
 # 2. query it
-python -m berlinduck.demo "a quiet hotel near the Louvre" -k 5
+PYTHONPATH=src python -m berlinduck.demo "a quiet hotel near the Louvre" -k 5
 
 # tests (similarity + chunking + vector store; need only numpy + qdrant-client)
 pytest
